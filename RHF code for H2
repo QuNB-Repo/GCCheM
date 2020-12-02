@@ -1,0 +1,278 @@
+using Pkg
+Pkg.add("SpecialFunctions")
+using SpecialFunctions
+Pkg.add("LinearAlgebra")
+using LinearAlgebra
+
+
+## Basis Function
+
+struct SOrbital
+           x0::Float64
+           y0::Float64
+           z0::Float64
+           alpha::Float64
+    end
+	
+function STO(Z, x0, y0, z0)
+       if Z == 1
+    global s = [0.168856 0.444635; 0.623913 0.535328; 3.42525 0.154329];
+        n = 3;
+        global c1 = s[1,2];
+        global c2 = s[2,2];
+        global c3 = s[3,2];
+        g1 = SOrbital(x0,y0,z0,s[1,1]);
+        g2 = SOrbital(x0,y0,z0,s[2,1]);
+        g3 = SOrbital(x0,y0,z0,s[3,1]);
+    end
+    return g1, g2, g3, c1, c2, c3
+end
+
+## Overlap
+
+function goverlap1D(x1, alpha1, x2, alpha2)
+    p = alpha1 + alpha2
+    q=(alpha1*alpha2)/p;
+    P=(alpha1*x1 + alpha2*x2)/p;
+    Q=x1-x2;
+    KAB=exp(-q*Q^2);
+return KAB
+end
+
+function goverlap(g1, g2)
+    Ex = goverlap1D(g1.x0, g1.alpha, g2.x0, g2.alpha);
+    Ey = goverlap1D(g1.y0, g1.alpha, g2.y0, g2.alpha);
+    Ez = goverlap1D(g1.z0, g1.alpha, g2.z0, g2.alpha);
+    s = Ex * Ey * Ez * sqrt(pi/(g1.alpha + g2.alpha))^3 * (2*g1.alpha/pi)^.75 * (2*g2.alpha/pi)^.75;
+    return s
+end
+
+function Build_Overlap(basis)
+nbasis = size(basis, 1)
+S = zeros(nbasis, nbasis)
+    for a in 1:nbasis
+        for b in 1:nbasis
+            for i in 1:3
+                for j in 1:3
+                     S[a,b] = S[a,b] + goverlap(basis[a][i], basis[b][j]) * basis[a][i+3] * basis[b][j+3];
+                end
+            end
+        end
+    end
+    return S
+end
+
+##Kinetic 
+
+function Build_Kinetic(basis)
+nbasis = size(basis, 1)
+T = zeros(nbasis, nbasis)
+    for a in 1:nbasis
+        for b in 1:nbasis
+            for i in 1:3
+                for j in 1:3
+                
+                    p = basis[a][i].alpha + basis[b][j].alpha;
+                    Px = (basis[a][i].alpha * basis[a][i].x0 + basis[b][j].alpha * basis[b][j].x0) / p;
+                    Py = (basis[a][i].alpha * basis[a][i].y0 + basis[b][j].alpha * basis[b][j].y0) / p;
+                    Pz = (basis[a][i].alpha * basis[a][i].z0 + basis[b][j].alpha * basis[b][j].z0) / p;
+
+                    T[a,b] = T[a,b] + 3*basis[b][j].alpha * goverlap(basis[a][i], basis[b][j]) * basis[a][i+3] * basis[b][j+3] -
+                    2 * basis[b][j].alpha^2 * ((Px - basis[b][j].x0)^2 + 1/(2 * p)) * goverlap(basis[a][i], basis[b][j]) * basis[a][i+3] * basis[b][j+3] -
+                    2 * basis[b][j].alpha^2 * ((Py - basis[b][j].y0)^2 + 1/(2 * p)) * goverlap(basis[a][i], basis[b][j]) * basis[a][i+3] * basis[b][j+3] -
+                    2 * basis[b][j].alpha^2 * ((Pz - basis[b][j].z0)^2 + 1/(2 * p)) * goverlap(basis[a][i], basis[b][j]) * basis[a][i+3] * basis[b][j+3];
+         
+                end
+            end
+        end
+    end     
+    return T
+end
+
+## Coulomb Integrals
+
+function Boys(x);
+    if x == 0
+        return 1
+    else
+        return (0.5*(pi/x)^0.5)*erf(x^0.5)
+    end
+end
+
+function coulombg(g1, g2, x0, y0, z0);
+a = g1.alpha;
+b = g2.alpha;
+p = a+b;
+P = [a * g1.x0 + b * g2.x0, a * g1.y0 + b * g2.y0, a * g1.z0 + b * g2.z0]/p;
+A = [x0, y0, z0];
+RPA2 = sum((A - P) .^ 2);
+    
+Ex = goverlap1D(g1.x0,a,g2.x0,b);
+Ey = goverlap1D(g1.y0,a,g2.y0,b);
+Ez = goverlap1D(g1.z0,a,g2.z0,b);
+
+V = -1 * 2 * pi/p * Boys(p * RPA2) * (2 * a/pi)^0.75 * (2 * b/pi)^0.75 * Ex * Ey * Ez;    
+    return V
+end
+
+function Build_Nuclear_Attraction(basis);
+    
+nbasis = size(basis, 1)
+y = size(basis, 1)
+VAB = zeros(nbasis, nbasis, y)
+
+    for c in 1:size(basis, 1)
+        for a in 1:nbasis
+            for b in 1:nbasis
+                for i in 1:3
+                    for j in 1:3
+                       VAB[a,b,c] = VAB[a,b,c] + coulombg(basis[a][i], basis[b][j], basis[c][i].x0, basis[c][i].y0, basis[c][i].z0) * basis[a][i+3] * basis[b][j+3];  
+                    end
+                end
+            end
+        end
+    end
+return VAB
+end
+
+
+##electron-electron repulsion
+
+function Build_Electron_Repulsion(basis);
+nbasis = size(basis, 1)
+gabcd = zeros(nbasis,nbasis,nbasis,nbasis);
+for a = 1:nbasis
+    for na = 1:0.5*size(basis[a], 1)
+        aa = basis[a][na].alpha;
+        for b = 1:nbasis
+            for nb = 1:0.5*size(basis[b], 1)
+                ab = basis[b][nb].alpha;
+                p = aa+ab;
+                Px = (basis[a][na].x0 * aa + basis[b][nb].x0 * ab)/p;
+                Py = (basis[a][na].y0 * aa + basis[b][nb].y0 * ab)/p;
+                Pz = (basis[a][na].z0 * aa + basis[b][nb].z0 * ab)/p;
+                EabX = goverlap1D(basis[a][na].x0, aa, basis[b][nb].x0, ab);
+                EabY = goverlap1D(basis[a][na].y0, aa, basis[b][nb].y0, ab);
+                EabZ = goverlap1D(basis[a][na].z0, aa, basis[b][nb].z0, ab);
+                A_AB = EabX * EabY * EabZ * basis[a][na+3] * basis[b][nb+3] * (2*basis[a][na].alpha/pi)^.75 * (2*basis[b][nb].alpha/pi)^.75;
+                for c = 1:nbasis
+                    for nc = 1:0.5*size(basis[c], 1)
+                        ac = basis[c][nc].alpha;
+                        for d = 1:nbasis
+                            for nd = 1:0.5*size(basis[d], 1)
+                                ad = basis[d][nd].alpha;
+                                pp = ac + ad;
+                                PPx = (basis[c][nc].x0*ac + basis[d][nd].x0*ad)/pp;
+                                PPy = (basis[c][nc].y0*ac + basis[d][nd].y0*ad)/pp;
+                                PPz = (basis[c][nc].z0*ac + basis[d][nd].z0*ad)/pp;
+                                EcdX = goverlap1D(basis[c][nc].x0, ac, basis[d][nd].x0, ad);
+                                EcdY = goverlap1D(basis[c][nc].y0, ac, basis[d][nd].y0, ad);
+                                EcdZ = goverlap1D(basis[c][nc].z0, ac, basis[d][nd].z0, ad);
+                                A_CD = EcdX * EcdY * EcdZ * (2*basis[d][nd].alpha/pi)^.75 * (2*basis[c][nc].alpha/pi)^.75 * basis[c][nc+3] * basis[d][nd+3];
+                                RPPP2 = (Px-PPx)^2 + (Py-PPy)^2 + (Pz-PPz)^2;
+                                alpha = pp*p/(pp+p);
+                                gabcd[a,b,c,d] = gabcd[a,b,c,d] + A_AB * A_CD * Boys(alpha*RPPP2) * 2*pi^2.5/(p*pp*sqrt(p+pp));
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+    return gabcd
+end
+
+
+function Build_Density(C, N);
+nb = size(C, 1);
+D = zeros(nb,nb);
+for n = 1:nb
+    for m = 1:nb
+        for i = 1:1    #should be 1:N/2 but julia makes it float instead of int and it becomes aproblem in the next line
+            D[n,m] = D[n,m] + (C[n,1] * C[m,1]);
+        end
+    end
+ end
+    return D
+end
+
+function Build_Coulomb_Exchange(D, Gabcd);
+nb = size(D,1);
+G = zeros(nb,nb);
+for a = 1:nb
+    for b = 1:nb
+        for c = 1:nb
+            for d = 1:nb
+                G[a,b] = G[a,b] + D[c,d] * (2 * Gabcd[a, b, c, d] - Gabcd[a, c, b, d]);
+            end
+        end
+    end
+end
+    return G
+end
+
+function Fock_Energy(D, H0, F)
+nb = size(D,1);
+E = 0;
+for n = 1:nb
+    for m = 1:nb
+        E = E + D[n,m] * (H0[n,m] + F[n,m]);
+    end
+end
+return E
+end
+
+function SCF(H0, Gabcd, S, N)
+maxcycle = 30;
+converged = 1;
+ncycle = 0;
+E = zeros(maxcycle, 1);
+v = eigvecs(S);
+d = Diagonal(eigvals(S));
+X = inv(v) * d^(-0.5) * v;
+nb = size(S,1);
+C = zeros(nb,nb);
+for a in 1:nb
+    for b in 1:nb
+        C[a,b] = (1/nb)
+    end
+end 
+    
+while ncycle < maxcycle
+        ncycle = ncycle + 1;
+        D = Build_Density(C, N);
+        G = Build_Coulomb_Exchange(D, Gabcd);
+        F = H0 + G;
+        Fprime = inv(X) * F * X;
+        Cprime = eigvecs(Fprime);
+        Cnew = X * Cprime;
+        Dnew = Build_Density(Cnew,N);
+        E[ncycle] = Fock_Energy(D, H0, F);
+        if ncycle > 1 && Cnew == C
+            return ncycle, E[ncycle],Cnew, Dnew
+        else
+            C = Cnew;
+        end
+end
+#    println("C = ", Cnew)
+#    println("D = ", Dnew)                           calc the energies
+#    println("number of cycles: ", ncycle)
+end
+
+
+
+
+##applying for H2 STO-3G
+
+A = STO(1, 0.0, 0.0, 1.4)
+B = STO(1, 0.0, 0.0, 0.0)
+basis = [A, B];
+N = 2;
+S = Build_Overlap(basis);
+T = Build_Kinetic(basis);
+V1 = Build_Nuclear_Attraction(basis)[:, :, 1];
+V2 = Build_Nuclear_Attraction(basis)[:, :, 2];
+H0 = T + V1 + V2;
+Gabcd = Build_Electron_Repulsion(basis);
+SCF(H0, Gabcd, S, N)
