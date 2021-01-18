@@ -226,7 +226,7 @@ end
 function SCF(H0, Gabcd, S, N)
 maxcycle = 30;
 converged = 1;
-ncycle = 0;
+ncycle = 2;
 E = zeros(maxcycle, 1);
 v = eigvecs(S);
 d = Diagonal(eigvals(S));
@@ -238,28 +238,31 @@ for a in 1:nb
         C[a,b] = (1/nb)
     end
 end 
+D = Build_Density(C, N);
+G = Build_Coulomb_Exchange(D, Gabcd);
+F = H0 + G;
+E[ncycle] = Fock_Energy(D, H0, F);
+#println("ncycle = ", ncycle);
+#println("Energy of ncycle = ",E[ncycle]);
     
-while ncycle < maxcycle
+while E[ncycle] != E[ncycle - 1]
         ncycle = ncycle + 1;
-        D = Build_Density(C, N);
-        G = Build_Coulomb_Exchange(D, Gabcd);
-        F = H0 + G;
         Fprime = inv(X) * F * X;
         Cprime = eigvecs(Fprime);
-        Cnew = X * Cprime;
-        Dnew = Build_Density(Cnew,N);
-        E[ncycle] = Fock_Energy(D, H0, F);
-        if ncycle > 1 && Cnew == C
-            return ncycle, E[ncycle],Cnew, Dnew
-        else
-            C = Cnew;
-        end
+        global Cnew = X * Cprime;
+        global Dnew = Build_Density(Cnew,N);
+        Gnew = Build_Coulomb_Exchange(Dnew, Gabcd);
+        Fnew = H0 + Gnew;
+        E[ncycle] = Fock_Energy(Dnew, H0, Fnew);
+        #println("ncycle = ", ncycle);
+        #println("Energy of ncycle = ",E[ncycle]);
+        
 end
-#    println("C = ", Cnew)
-#    println("D = ", Dnew)                           calc the energies
-#    println("number of cycles: ", ncycle)
+println("C = ", Cnew)
+println("D = ", Dnew)                      
+println("number of cycles: ", ncycle)
+println("HF Energy = ",E[ncycle]);
 end
-
 
 
 
