@@ -1,0 +1,35 @@
+# Prequisites
+
+1. Install PyBind11 
+
+```
+python -m pip install pybind11 -v --user
+```
+
+2. Install PyGNME [do this somewhere sensible, like ~/code/ ]
+   NOTE: Requires GCC version to be at least 5...
+
+```
+git clone  --recurse-submodules git@github.com:hgaburton/pygnme.git
+cd pygnme/
+python -m pip install . -v --user
+cd ../
+```
+
+3. Make sure your python3 'site-packages' are included in the LD_LIBRARY_PATH
+
+something like....
+
+```
+echo "export LD_LIBRARY_PATH:~/.local/lib/python3.8/site-packages/:$LD_LIBRARY_PATH" >> ~/.bashrc
+source ~/.bashrc
+```
+
+4. Run the code within this directory
+
+```
+cd gnme_example
+python noci.py
+```
+
+5. Check the output against the reference in "output"
